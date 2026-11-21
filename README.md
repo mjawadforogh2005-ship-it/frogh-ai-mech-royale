@@ -1,6 +1,17 @@
 # Frogh AI Lab — Mech Royale
 
-Python bot project for the Builders Mech Royale competition. This initial version is the unchanged official Python example, not a competitive strategy yet.
+Python bot for the Builders Mech Royale competition. The custom bot is `bot.py`; the unchanged official `example_bot.py` remains available for comparison. No third-party runtime dependencies or network access are required.
+
+## Strategy
+
+- Prioritize the current safe zone and start moving toward the next circle before travel time becomes critical.
+- Retreat when health is low or nearby opponents outnumber us; stop attacking at a distance to allow regeneration.
+- Use the supplied terrain and building polygons for ground clearance, local steering, and firing-path checks. Avoid steep steps and large drops, and attempt recovery when stuck.
+- Lead gun targets using projectile interception. Gate shots on actual torso aim; handle laser charge/release, lightning energy reserves, and low-arc mortar shots separately.
+- Collect reachable cubes and weapons, approach nearby uncontested supply drops, and prioritize defensive upgrades.
+- React to incoming straight-line projectiles and preserve energy for escapes.
+
+These are deterministic heuristics, not a trained model. Navigation uses local steering rather than a complete route planner; complex courtyards, rooftop travel, and prolonged obstacle avoidance remain limitations. Map and projectile checks approximate the server physics. Balance is read from the match configuration and current upgraded stats. Practice-match performance has not yet been measured.
 
 ## Local check
 
@@ -9,7 +20,8 @@ Python 3.12 works for the supplied baseline. The supplied Dockerfile uses Python
 From this directory:
 
 ```sh
-python check/check.py -- python -u example_bot.py
+python -m unittest discover -s tests -v
+python check/check.py -- python -u bot.py
 ```
 
 The checker replays 300 recorded observations. It verifies protocol behavior and response timing; it is not a simulator and cannot measure playing strength.
@@ -27,7 +39,10 @@ The arena is mounted at runtime and excluded from the image build context.
 
 ## Files
 
-- `example_bot.py`: unchanged official baseline; current entrypoint.
+- `bot.py`: custom Frogh AI Lab strategy and current entrypoint.
+- `navigation.py`: terrain, polygon collision, firing paths, and local steering.
+- `tests/`: focused strategy and geometry regression tests.
+- `example_bot.py`: unchanged official baseline.
 - `mechfight.py`: official typed protocol wrapper.
 - `Dockerfile`: official Python image configuration at repository root.
 - `protocol.md` and `mechfight.schema.json`: supplied specification and schema.
@@ -36,11 +51,10 @@ The arena is mounted at runtime and excluded from the image build context.
 
 ## Development plan
 
-1. Preserve the passing baseline in Git.
-2. Implement zone-aware survival and navigation, then aiming and resource collection.
-3. Check protocol compliance after meaningful changes.
-4. Validate the Linux container under match restrictions.
-5. Publish and submit only when ready; evaluate strategy using actual practice matches.
+1. Check protocol compliance and regression tests after meaningful changes.
+2. Confirm the GitHub Actions Linux container check passes for the exact commit.
+3. When ready to submit, evaluate the strategy using actual practice matches.
+4. Use match outcomes to improve route planning, threat assessment, and weapon selection.
 
 According to the supplied protocol, submission requires a public GitHub repository, a top-level Dockerfile, a submitted repository no larger than 20 MB, and a linux/amd64 build finishing within ten minutes. Each submission runs 48 practice matches. There is no network during matches; decisions have a 50 ms budget, one CPU, and 512 MB RAM. Placement determines points, so survival is the primary objective.
 
@@ -48,6 +62,6 @@ Competition deadline, participant eligibility, AI-assistance rules, redistributi
 
 ## Setup validation — 2026-11-21
 
-The unchanged example passed the official checker locally on Windows with Python 3.12: 300/300 observations on time, no wrong ticks or bad lines, and no debug-cap violations. Local container validation is pending because Docker was not found on PATH. No competition submission has been created.
+Both the official baseline and custom bot passed the official checker locally on Windows with Python 3.12. The custom bot answered 300/300 observations on time with no wrong ticks, bad lines, or debug-cap violations. Its latest local run measured p99 12.2 ms and maximum 12.8 ms against the 50 ms budget. These timings are machine-specific, not measurements under the match CPU limit. All 16 regression tests passed, including direct strategy execution on the recording so the wrapper cannot mask exceptions. Local container validation is unavailable because Docker was not found on PATH. No competition submission has been created.
 
 GitHub Actions runs the Python checker and a sandboxed Linux container check on pushes and pull requests. Check the Actions result before treating container validation as passed.

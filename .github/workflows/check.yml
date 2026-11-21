@@ -15,7 +15,9 @@ jobs:
         with:
           python-version: '3.13'
       - name: Check Python bot
-        run: python check/check.py -- python -u example_bot.py
+        run: python check/check.py -- python -u bot.py
+      - name: Test strategy and map geometry
+        run: python -m unittest discover -s tests -v
       - name: Build Linux image
         run: docker build --platform linux/amd64 -t frogh-ai-mech-royale .
       - name: Check sandboxed container
