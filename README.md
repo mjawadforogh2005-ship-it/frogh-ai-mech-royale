@@ -48,4 +48,6 @@ Competition deadline, participant eligibility, AI-assistance rules, redistributi
 
 ## Setup validation — 2026-11-21
 
-The unchanged example passed the official checker locally on Windows with Python 3.12: 300/300 observations on time, no wrong ticks or bad lines, and no debug-cap violations. Container validation is pending because Docker was not found on PATH. No GitHub remote or competition submission has been created.
+The unchanged example passed the official checker locally on Windows with Python 3.12: 300/300 observations on time, no wrong ticks or bad lines, and no debug-cap violations. Local container validation is pending because Docker was not found on PATH. No competition submission has been created.
+
+GitHub Actions runs the Python checker and a sandboxed Linux container check on pushes and pull requests. Check the Actions result before treating container validation as passed.

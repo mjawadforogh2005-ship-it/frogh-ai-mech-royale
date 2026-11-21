@@ -1,0 +1,27 @@
+name: Bot conformance
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check Python bot
+        run: python check/check.py -- python -u example_bot.py
+      - name: Build Linux image
+        run: docker build --platform linux/amd64 -t frogh-ai-mech-royale .
+      - name: Check sandboxed container
+        run: >-
+          python check/check.py --map-dir /arena --
+          docker run --rm -i --network none --cpus 1 --memory 512m
+          --memory-swap 512m --read-only --tmpfs /tmp:rw,size=64m
+          --user 65534:65534 --cap-drop ALL --pids-limit 128
+          -v "$PWD/arena:/arena:ro" frogh-ai-mech-royale
