@@ -70,6 +70,28 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(a['reload'])
         self.assertFalse(a['fire'][0])
 
+    def test_cooldown_keeps_target_aim_without_midfight_reload(self):
+        self.obs['mechs'] = [enemy(80, 40)]
+        self.obs['self']['weapons'][0].update(ammo=6, cooldown=.2)
+        a = self.bot.act(self.obs)
+        self.assertAlmostEqual(a['aim'][0], math.atan2(40, 80))
+        self.assertFalse(a['reload'])
+        self.assertFalse(a['fire'][0])
+
+    def test_tiny_zone_requires_precise_arrival(self):
+        self.obs['zone'].update(radius=.5, next_radius=0)
+        self.obs['self']['pos'] = [1, 0, 0]
+        a = self.bot.act(self.obs)
+        self.assertLess(a['move'][0], -.9)
+
+    def test_charging_laser_retains_aim_over_gun_target(self):
+        self.obs['mechs'] = [enemy(80, 40)]
+        self.obs['mechs'][0]['vel'] = [0, 15, 0]
+        self.obs['self']['weapons'][1] = dict(kind='laser', cooldown=0, charge=.4, stats=HELLO['config']['weapons']['laser'])
+        a = self.bot.act(self.obs)
+        self.assertAlmostEqual(a['aim'][0], math.atan2(40, 80))
+        self.assertTrue(a['fire'][1])
+
     def test_laser_charges_then_releases(self):
         self.obs['mechs'] = [enemy()]
         self.obs['self']['weapons'] = [None, dict(kind='laser', cooldown=0, charge=0, stats=HELLO['config']['weapons']['laser'])]
@@ -148,6 +170,18 @@ class GeometryTests(unittest.TestCase):
         move = steer(self.arena, [0, 0, 0], [20, 0], stats, dict(center=[0, 0], radius=90), [0, 0], 1)
         self.assertNotEqual(move, [0., 0.])
         self.assertTrue(self.arena.travel_clear([0, 0, 0], move, 6, stats))
+
+    def test_walk_on_roof_without_treating_ground_as_drop(self):
+        self.prism.update(ring=[-20, -20, 20, -20, 20, 20, -20, 20], top=20)
+        self.assertTrue(self.arena.travel_clear([0, 0, 20], [1, 0], 6, HELLO['config']['mech']))
+
+    def test_roof_above_head_is_not_a_walkable_surface(self):
+        self.prism.update(ring=[-20, -20, 20, -20, 20, 20, -20, 20], base=10, top=12)
+        self.assertTrue(self.arena.travel_clear([0, 0, 0], [1, 0], 6, HELLO['config']['mech']))
+
+    def test_roof_edge_does_not_allow_large_drop(self):
+        self.prism.update(ring=[-20, -20, 2, -20, 2, 20, -20, 20], top=20)
+        self.assertFalse(self.arena.travel_clear([0, 0, 20], [1, 0], 6, HELLO['config']['mech']))
 
 
 if __name__ == '__main__':

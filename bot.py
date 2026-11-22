@@ -160,7 +160,8 @@ class Bot:
             self.recovery_direction = [-toward[1]*self.side, toward[0]*self.side]
         if now < self.recover_until:
             goal = [pos[0]+self.recovery_direction[0]*12, pos[1]+self.recovery_direction[1]*12]
-        move = steer(self.arena, pos, goal, stats, zone, self.last_move, self.side) if math.dist(pos[:2], goal[:2]) > 2 else [0., 0.]
+        arrival = min(2., max(.05, zone['radius']*.2))
+        move = steer(self.arena, pos, goal, stats, zone, self.last_move, self.side) if math.dist(pos[:2], goal[:2]) > arrival else [0., 0.]
         # React to approaching projectiles using their closest approach in the next second.
         for p in obs['projectiles'][:24]:
             if p['kind'] == 'mortar':
@@ -193,18 +194,22 @@ class Bot:
         if self.healing and threat_distance > 45:
             targets = []  # Dealing damage resets health regeneration too.
         choices = []
+        solutions = {}
         for target in targets:
             for slot, w in enumerate(me['weapons']):
                 if not w or w.get('reload', 0) > 0 or (w['kind'] == 'gun' and w.get('ammo', 0) == 0):
                     continue
-                if w.get('cooldown', 0) > .1 and w.get('charge', 0) == 0:
-                    continue
+                # Continue tracking through cooldown: losing aim between gun
+                # shots wastes turn time and used to trigger premature reloads.
                 if w['kind'] == 'laser' and retreat and w.get('charge', 0) == 0:
                     continue
                 sol = self.solution(me, target, w)
+                solutions[(target['id'], slot)] = sol
                 if sol:
-                    score = (100 if target.get('kind') == 'mech' else 35) - sol[1]*.15 + (20 if w.get('charge', 0) > 0 else 0)
+                    score = (100 if target.get('kind') == 'mech' else 35) - sol[1]*.15 + (100 if w.get('charge', 0) > 0 else 0)
                     score += {'laser': 12, 'lightning': 15, 'gun': 5, 'mortar': 0}[w['kind']]
+                    if w.get('cooldown', 0) > .1:
+                        score -= 30
                     choices.append((score, slot, target, sol))
         if choices:
             _, slot, target, sol = max(choices, key=lambda c: c[0])
@@ -212,7 +217,8 @@ class Bot:
             for i, w in enumerate(me['weapons']):
                 if not w:
                     continue
-                aim = sol if i == slot else self.solution(me, target, w)
+                key = (target['id'], i)
+                aim = solutions[key] if key in solutions else self.solution(me, target, w)
                 if aim is None:
                     continue
                 ws, kind = self.weapon_stats(w), w['kind']
@@ -229,9 +235,9 @@ class Bot:
                     action['fire'][i] = bool(ready and aligned and compatible and (kind != 'gun' or w.get('ammo', 0) > 0))
         for w in me['weapons']:
             if w and w['kind'] == 'gun' and not w.get('reload', 0):
-                action['reload'] = bool(w.get('ammo', 0) == 0 or (not choices and w.get('ammo', 0) < self.weapon_stats(w)['mag']*.65))
+                action['reload'] = bool(w.get('ammo', 0) == 0 or (not choices and threat_distance > 150 and w.get('ammo', 0) < self.weapon_stats(w)['mag']*.65))
         self.last_pos, self.last_move = list(pos), move
-        self.last_wanted = math.dist(pos[:2], goal[:2]) > 2
+        self.last_wanted = math.dist(pos[:2], goal[:2]) > arrival
         mf.draw.label(f'{mode} | hp {ratio:.0%}')
         mf.draw.point([*goal[:2], pos[2]], '#40c0ff', 5)
         return action

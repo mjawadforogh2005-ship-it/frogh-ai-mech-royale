@@ -119,6 +119,11 @@ class Arena:
             d = min(distance, k*1.5)
             x, y = pos[0]+direction[0]*d, pos[1]+direction[1]*d
             ground = self.height(x, y)
+            # Roofs and bridge decks are walking surfaces too. Only consider
+            # surfaces reachable from our previous foot height, not roofs above us.
+            for p in self.nearby(x, y):
+                if ground < p['top'] <= previous + step and self.solid(p, x, y):
+                    ground = p['top']
             # Ground navigation deliberately avoids large drops and unwalkable rises.
             if ground - previous > step or previous - ground > 4:
                 return False

@@ -60,8 +60,12 @@ According to the supplied protocol, submission requires a public GitHub reposito
 
 Competition deadline, participant eligibility, AI-assistance rules, redistribution terms, and certificate availability are not established by this kit. Verify those with the organizer before publishing or submitting.
 
-## Setup validation — 2026-11-21
+## Validation — 2026-11-22
 
-Both the official baseline and custom bot passed the official checker locally on Windows with Python 3.12. The custom bot answered 300/300 observations on time with no wrong ticks, bad lines, or debug-cap violations. Its latest local run measured p99 12.2 ms and maximum 12.8 ms against the 50 ms budget. These timings are machine-specific, not measurements under the match CPU limit. All 16 regression tests passed, including direct strategy execution on the recording so the wrapper cannot mask exceptions. Local container validation is unavailable because Docker was not found on PATH. No competition submission has been created.
+The reviewed custom bot passed all 22 regression tests and answered 300/300 recorded observations on time with no wrong ticks, bad lines, or debug-cap violations. Its latest local protocol run measured p99 36.2 ms and maximum 41.9 ms against the 50 ms budget. A separate 100-decision synthetic combat workload with four moving enemies and both gun and mortar available measured a maximum of 36.68 ms, with no decisions over 50 ms. These timings are machine-specific, not measurements under the match CPU limit or evidence of winning performance. Direct strategy execution on the recording also checks for exceptions that the protocol wrapper might mask.
+
+The review corrected cooldown aim tracking, premature combat reloads, charged-laser priority, walking on roof and bridge surfaces, and arrival precision in tiny zones. Regression tests cover these cases. Navigation still uses local steering, and complex multi-building routes need practice-match evaluation.
+
+The earlier commit `a61f9cb` passed GitHub's Linux container checks. The reviewed revision needs its own green Actions run after pushing. Local container validation is unavailable because Docker was not found on PATH. No competition submission has been made through this project workflow.
 
 GitHub Actions runs the Python checker and a sandboxed Linux container check on pushes and pull requests. Check the Actions result before treating container validation as passed.
