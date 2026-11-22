@@ -2,7 +2,7 @@
 import math
 import random
 import mechfight as mf
-from navigation import Arena, steer, unit
+from navigation import Arena, plan_route, steer, unit
 
 
 def angle_error(a, b):
@@ -34,6 +34,9 @@ class Bot:
         self.stuck_since = None
         self.recover_until = 0
         self.healing = False
+        self.route_goal = None
+        self.route_points = []
+        self.route_tick = -100
         try:
             self.arena = Arena(hello['map']['dir'])
         except (OSError, ValueError, KeyError) as exc:
@@ -148,6 +151,17 @@ class Bot:
             r = max(0, zone['radius']-20)
             if math.dist(goal[:2], zone['center']) > r:
                 goal = [zone['center'][0]+delta[0]*r, zone['center'][1]+delta[1]*r]
+        route_key = (round(goal[0]/24)*24, round(goal[1]/24)*24)
+        if (route_key != self.route_goal or now-self.route_tick > 2.0 or not self.route_points):
+            self.route_points = plan_route(self.arena, pos, goal, stats, spacing=24)
+            self.route_goal = route_key
+            self.route_tick = now
+        if self.route_points:
+            while len(self.route_points) > 1 and math.dist(pos[:2], self.route_points[0]) < 18:
+                self.route_points.pop(0)
+            route_goal = self.route_points[0]
+        else:
+            route_goal = goal
         if self.last_pos and math.dist(pos[:2], self.last_pos[:2]) < .15 and self.last_wanted:
             self.stuck_since = now if self.stuck_since is None else self.stuck_since
         else:
@@ -160,8 +174,9 @@ class Bot:
             self.recovery_direction = [-toward[1]*self.side, toward[0]*self.side]
         if now < self.recover_until:
             goal = [pos[0]+self.recovery_direction[0]*12, pos[1]+self.recovery_direction[1]*12]
+        movement_goal = goal if now < self.recover_until else route_goal
         arrival = min(2., max(.05, zone['radius']*.2))
-        move = steer(self.arena, pos, goal, stats, zone, self.last_move, self.side) if math.dist(pos[:2], goal[:2]) > arrival else [0., 0.]
+        move = steer(self.arena, pos, movement_goal, stats, zone, self.last_move, self.side) if math.dist(pos[:2], movement_goal[:2]) > arrival else [0., 0.]
         # React to approaching projectiles using their closest approach in the next second.
         for p in obs['projectiles'][:24]:
             if p['kind'] == 'mortar':
@@ -237,7 +252,7 @@ class Bot:
             if w and w['kind'] == 'gun' and not w.get('reload', 0):
                 action['reload'] = bool(w.get('ammo', 0) == 0 or (not choices and threat_distance > 150 and w.get('ammo', 0) < self.weapon_stats(w)['mag']*.65))
         self.last_pos, self.last_move = list(pos), move
-        self.last_wanted = math.dist(pos[:2], goal[:2]) > arrival
+        self.last_wanted = math.dist(pos[:2], movement_goal[:2]) > arrival
         mf.draw.label(f'{mode} | hp {ratio:.0%}')
         mf.draw.point([*goal[:2], pos[2]], '#40c0ff', 5)
         return action

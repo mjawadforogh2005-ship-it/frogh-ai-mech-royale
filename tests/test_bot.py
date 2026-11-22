@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 
 from bot import Bot, intercept
-from navigation import Arena, inside, steer
+from navigation import Arena, inside, plan_route, steer
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -170,6 +170,18 @@ class GeometryTests(unittest.TestCase):
         move = steer(self.arena, [0, 0, 0], [20, 0], stats, dict(center=[0, 0], radius=90), [0, 0], 1)
         self.assertNotEqual(move, [0., 0.])
         self.assertTrue(self.arena.travel_clear([0, 0, 0], move, 6, stats))
+
+    def test_route_planner_returns_waypoints_around_wall(self):
+        stats = HELLO['config']['mech']
+        route = plan_route(
+            self.arena,
+            [0, 0, 0],
+            [20, 0],
+            stats,
+            spacing=12,
+        )
+        self.assertTrue(route)
+        self.assertNotEqual(route[-1][1], 0)
 
     def test_walk_on_roof_without_treating_ground_as_drop(self):
         self.prism.update(ring=[-20, -20, 20, -20, 20, 20, -20, 20], top=20)
