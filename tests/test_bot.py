@@ -51,6 +51,41 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(a['fire'], [False, False])
         self.assertLess(a['move'][0], 0)
 
+    def test_returns_fire_while_incoming_damage_prevents_healing(self):
+        self.obs['self']['hp'] = 300
+        self.obs['mechs'] = [enemy()]
+        self.obs['events'] = [dict(type='damaged', amount=45, weapon='gun', by=9, bearing=0)]
+        a = self.bot.act(self.obs)
+        self.assertTrue(a['fire'][0])
+        self.assertLess(a['move'][0], 0)
+        self.obs['events'] = []
+        self.obs['t'] += 1.1
+        self.assertFalse(self.bot.act(self.obs)['fire'][0])
+
+    def test_health_loss_detects_damage_without_event(self):
+        self.obs['mechs'] = [enemy()]
+        self.bot.act(self.obs)
+        self.obs['self']['hp'] = 300
+        self.obs['t'] += .1
+        self.assertTrue(self.bot.act(self.obs)['fire'][0])
+
+    def test_zone_damage_does_not_trigger_passive_healing(self):
+        self.obs['self'].update(hp=300, in_zone=False)
+        self.obs['mechs'] = [enemy()]
+        self.assertTrue(self.bot.act(self.obs)['fire'][0])
+
+    def test_holds_trigger_when_cooldown_ends_within_action(self):
+        self.obs['mechs'] = [enemy()]
+        self.obs['self']['weapons'][0]['cooldown'] = .04
+        self.assertTrue(self.bot.act(self.obs)['fire'][0])
+        self.obs['self']['aim'] = [math.pi, 0]
+        self.assertFalse(self.bot.act(self.obs)['fire'][0])
+
+    def test_cooling_weapon_still_respects_reload(self):
+        self.obs['mechs'] = [enemy()]
+        self.obs['self']['weapons'][0].update(cooldown=.04, reload=.5)
+        self.assertFalse(self.bot.act(self.obs)['fire'][0])
+
     def test_pickup_rejects_different_floor(self):
         self.obs['pickups'] = [dict(id=8000, kind='laser', pos=[1, 0, 8])]
         self.assertNotIn('take', self.bot.act(self.obs))

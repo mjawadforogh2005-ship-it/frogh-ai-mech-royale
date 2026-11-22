@@ -42,6 +42,8 @@ class Bot:
         self.stuck_since = None
         self.recover_until = 0
         self.healing = False
+        self.last_damage_time = -float('inf')
+        self.previous_hp = None
         try:
             self.arena = Arena(hello['map']['dir'])
         except (OSError, ValueError, KeyError) as exc:
@@ -115,6 +117,11 @@ class Bot:
     def act(self, obs):
         me, zone, now = obs['self'], obs['zone'], obs['t']
         pos, stats = me['pos'], self.stats(me)
+        if (any(e['type'] == 'damaged' for e in obs['events']) or
+                (self.previous_hp is not None and me['hp'] < self.previous_hp)):
+            self.last_damage_time = now
+        self.previous_hp = me['hp']
+        under_fire = now - self.last_damage_time < min(1., stats['regen_delay'])
         ratio = me['hp']/max(1, me['max_hp'])
         self.healing = ratio < .42 or (self.healing and ratio < .82)
         enemies = sorted(
@@ -206,8 +213,10 @@ class Bot:
         if not enemies and not retreat and threat_distance > 90:
             targets += sorted(obs['crates'], key=lambda c: math.dist(pos, c['pos']))[:2]
             targets += sorted((e for e in obs['mechs'] if e['kind'] == 'npc'), key=lambda e: math.dist(pos, e['pos']))[:1]
-        if self.healing and threat_distance > 45:
-            targets = []  # Dealing damage resets health regeneration too.
+        if self.healing and threat_distance > 45 and not under_fire and me['in_zone']:
+            # Cease fire when disengaged. Recent incoming damage or zone damage
+            # already prevents regeneration; do not become a defenseless target.
+            targets = []
         choices = []
         solutions = {}
         usable_targets = 0
@@ -252,13 +261,17 @@ class Bot:
                 aligned = angle_error(me['aim'][0], aim[0][0]) < tolerance and abs(me['aim'][1]-aim[0][1]) < tolerance
                 compatible = angle_error(action['aim'][0], aim[0][0]) < tolerance and abs(action['aim'][1]-aim[0][1]) < tolerance
                 ready = w.get('cooldown', 0) <= 0 and w.get('reload', 0) <= 0
+                # A held trigger remains active across all simulation ticks in
+                # this decision. Let cooling weapons fire when ready mid-action.
+                decision_s = self.config['match']['decide_every'] / self.config['match']['tick_hz']
+                ready_during_action = w.get('cooldown', 0) < decision_s and w.get('reload', 0) <= 0
                 if kind == 'laser':
                     # Release at full charge only once actual aim is aligned.
                     action['fire'][i] = bool(compatible and (w.get('charge', 0) > 0 or (ready and not retreat)) and not (aligned and w.get('charge', 0) >= ws['charge']))
                 elif kind == 'lightning':
-                    action['fire'][i] = bool(ready and compatible and angle_error(me['aim'][0], aim[0][0]) < math.radians(ws['cone_deg'])*.45 and me['energy'] > ws['energy']+15)
+                    action['fire'][i] = bool(ready_during_action and compatible and angle_error(me['aim'][0], aim[0][0]) < math.radians(ws['cone_deg'])*.45 and me['energy'] > ws['energy']+15)
                 else:
-                    action['fire'][i] = bool(ready and aligned and compatible and (kind != 'gun' or w.get('ammo', 0) > 0))
+                    action['fire'][i] = bool(ready_during_action and aligned and compatible and (kind != 'gun' or w.get('ammo', 0) > 0))
         for w in me['weapons']:
             if w and w['kind'] == 'gun' and not w.get('reload', 0):
                 action['reload'] = bool(w.get('ammo', 0) == 0 or (not choices and threat_distance > 150 and w.get('ammo', 0) < self.weapon_stats(w)['mag']*.65))

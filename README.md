@@ -1,5 +1,11 @@
 # Frogh AI Lab — Mech Royale
 
+## Latest combat correction — November 22
+
+The bot now returns fire while recent incoming damage or being outside the safe zone prevents healing, while still ceasing fire after disengaging to allow regeneration. Gun, mortar, and lightning triggers can stay held when their cooldown ends during the next decision interval, provided aim and the other firing conditions are satisfied. Laser charge/release behavior is unchanged.
+
+Validation for this revision: 32 unit tests passed, and the official replay checker reported 300/300 responses on time (local p99 12.0 ms, maximum 13.7 ms). These are protocol and decision checks, not match results or container timing guarantees. The user's latest screenshot shows the older selected entry at 2.67 and the newer entry at 2.51; keep the selected entry until a new practice result proves better. The screenshot marks the 0.69 run as using a previous scorer version, so it is not directly comparable.
+
 Python bot for the Builders Mech Royale competition. The custom bot is `bot.py`; the unchanged official `example_bot.py` remains available for comparison. No third-party runtime dependencies or network access are required.
 
 ## Strategy
