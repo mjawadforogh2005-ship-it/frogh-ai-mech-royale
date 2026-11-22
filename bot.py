@@ -2,7 +2,7 @@
 import math
 import random
 import mechfight as mf
-from navigation import Arena, steer, unit
+from navigation import Arena, Planner, steer, unit
 
 
 def angle_error(a, b):
@@ -49,6 +49,19 @@ class Bot:
         except (OSError, ValueError, KeyError) as exc:
             mf.log('Map unavailable; using reactive navigation:', exc)
             self.arena = None
+        self.planner = Planner(self.arena, self.config['mech']) if self.arena else None
+
+    def plan_goal(self, goal, pos, now, stats):
+        """Route around walls with an incremental A*; returns a waypoint or the goal."""
+        pl = self.planner
+        if not pl or self.arena is None or math.dist(pos[2:3], [self.arena.height(pos[0], pos[1])]) > 3:
+            return goal
+        moved = pl.goal_xy is None or math.dist(goal, pl.goal_xy) > 25
+        if pl.state is None or moved or (pl.state in ('done', 'failed') and now-pl.age_t > 12):
+            pl.start(pos[:2], goal, now)
+        pl.advance(1500, max_ms=8)
+        wp = pl.waypoint(pos, stats)
+        return list(wp) if wp else goal
 
     def stats(self, me):
         return {**self.config['mech'], **me['stats']}
@@ -170,6 +183,8 @@ class Bot:
             r = max(0, zone['radius']-20)
             if math.dist(goal[:2], zone['center']) > r:
                 goal = [zone['center'][0]+delta[0]*r, zone['center'][1]+delta[1]*r]
+        if mode == 'zone' and me['grounded']:
+            goal = self.plan_goal(goal, pos, now, stats)
         if self.last_pos and math.dist(pos[:2], self.last_pos[:2]) < .15 and self.last_wanted:
             self.stuck_since = now if self.stuck_since is None else self.stuck_since
         else:
@@ -183,7 +198,11 @@ class Bot:
         if now < self.recover_until:
             goal = [pos[0]+self.recovery_direction[0]*12, pos[1]+self.recovery_direction[1]*12]
         arrival = min(2., max(.05, zone['radius']*.2))
-        move = steer(self.arena, pos, goal, stats, zone, self.last_move, self.side) if math.dist(pos[:2], goal[:2]) > arrival else [0., 0.]
+        # No walkable route (e.g. a plateau): in a hurry, accept dropping off ledges.
+        pl = self.planner
+        no_route = bool(pl and (pl.state == 'failed' or (pl.state == 'search' and now-pl.age_t > 5)))
+        drop = 80 if (mode == 'zone' and urgent and no_route) else 4
+        move = steer(self.arena, pos, goal, stats, zone, self.last_move, self.side, drop) if math.dist(pos[:2], goal[:2]) > arrival else [0., 0.]
         # React to approaching projectiles using their closest approach in the next second.
         for p in obs['projectiles'][:24]:
             if p['kind'] == 'mortar':

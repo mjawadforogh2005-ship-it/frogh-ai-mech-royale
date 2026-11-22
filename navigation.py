@@ -111,7 +111,7 @@ class Arena:
         steps = max(1, math.ceil(length/2))
         return all(start[2]+dz*k/steps > self.height(start[0]+dx*k/steps, start[1]+dy*k/steps) for k in range(1, steps+1))
 
-    def travel_clear(self, pos, direction, distance, stats):
+    def travel_clear(self, pos, direction, distance, stats, max_drop=4):
         radius, height = stats['radius'], stats['height']
         step = stats['step_up']
         previous = pos[2]
@@ -125,7 +125,7 @@ class Arena:
                 if ground < p['top'] <= previous + step and self.solid(p, x, y):
                     ground = p['top']
             # Ground navigation deliberately avoids large drops and unwalkable rises.
-            if ground - previous > step or previous - ground > 4:
+            if ground - previous > step or previous - ground > max_drop:
                 return False
             if not self.clear_body(x, y, ground, radius, height, step):
                 return False
@@ -138,7 +138,7 @@ def unit(x, y):
     return [x/d, y/d] if d > 1e-6 else [0., 0.]
 
 
-def steer(arena, pos, goal, stats, zone, last, side):
+def steer(arena, pos, goal, stats, zone, last, side, max_drop=4):
     desired = unit(goal[0]-pos[0], goal[1]-pos[1])
     if desired == [0., 0.]:
         return desired
@@ -149,10 +149,154 @@ def steer(arena, pos, goal, stats, zone, last, side):
     for i in range(16):
         a = angle + side * i * math.pi/8
         direction = [math.cos(a), math.sin(a)]
-        if not arena.travel_clear(pos, direction, 6, stats):
+        if not arena.travel_clear(pos, direction, 6, stats, max_drop):
             continue
         x, y = pos[0]+direction[0]*6, pos[1]+direction[1]*6
         outside = max(0, math.hypot(x-zone['center'][0], y-zone['center'][1])-zone['radius'])
         score = 3*(direction[0]*desired[0]+direction[1]*desired[1]) + .8*(direction[0]*last[0]+direction[1]*last[1]) - outside*.3
         candidates.append((score, -i, direction))
     return max(candidates)[2] if candidates else [0., 0.]
+
+
+class Planner:
+    """Incremental grid A* over ground-level walkable cells.
+
+    Fixes the failure where local steering jitters against a wall (courtyards,
+    building fronts) because it only looks 6 m ahead. Work is spread across
+    decisions (`advance(budget)`) so one decision never exceeds the 50 ms limit.
+    """
+    NEIGH = [(1, 0, 1.), (-1, 0, 1.), (0, 1, 1.), (0, -1, 1.),
+             (1, 1, 1.4143), (1, -1, 1.4143), (-1, 1, 1.4143), (-1, -1, 1.4143)]
+
+    def __init__(self, arena, stats, cell=2.0, weight=2.0, max_expansions=60000):
+        self.arena, self.cell, self.weight, self.max_exp = arena, cell, weight, max_expansions
+        self.radius = stats['radius'] + .1
+        self.height, self.step = stats['height'], stats['step_up']
+        b = arena.world['bounds']
+        self.minx, self.miny = b['minX'], b['minY']
+        self.memo = {}
+        self.reset()
+
+    def reset(self):
+        self.state = None   # None / 'search' / 'done' / 'failed'
+        self.path = []
+        self.goal_xy = None
+        self.age_t = None
+
+    def cell_of(self, x, y):
+        return int((x-self.minx)//self.cell), int((y-self.miny)//self.cell)
+
+    def center(self, c):
+        return self.minx+(c[0]+.5)*self.cell, self.miny+(c[1]+.5)*self.cell
+
+    def walkable(self, c):
+        v = self.memo.get(c)
+        if v is None:
+            x, y = self.center(c)
+            h = self.arena.height(x, y)
+            v = self.arena.clear_body(x, y, h, self.radius, self.height, self.step)
+            self.memo[c] = v
+        return v
+
+    def snap(self, c, limit=10):
+        """Nearest walkable cell to c (ring search)."""
+        if self.walkable(c):
+            return c
+        for r in range(1, limit+1):
+            best = None
+            for dx in range(-r, r+1):
+                for dy in range(-r, r+1):
+                    if max(abs(dx), abs(dy)) != r:
+                        continue
+                    n = (c[0]+dx, c[1]+dy)
+                    if self.walkable(n):
+                        d = dx*dx+dy*dy
+                        if best is None or d < best[0]:
+                            best = (d, n)
+            if best:
+                return best[1]
+        return None
+
+    def edge_ok(self, a, b):
+        xa, ya = self.center(a)
+        xb, yb = self.center(b)
+        d = math.hypot(xb-xa, yb-ya)
+        if abs(self.arena.height(xb, yb)-self.arena.height(xa, ya)) > .85*d:
+            return False
+        xm, ym = (xa+xb)/2, (ya+yb)/2
+        return self.arena.clear_body(xm, ym, self.arena.height(xm, ym), self.radius, self.height, self.step)
+
+    def start(self, start_xy, goal_xy, now=0.):
+        s = self.snap(self.cell_of(*start_xy))
+        g = self.snap(self.cell_of(*goal_xy), 20)
+        self.path, self.goal_xy, self.age_t = [], list(goal_xy), now
+        if s is None or g is None:
+            self.state = 'failed'
+            return
+        self.goal = g
+        self.open = [(0., 0., s)]
+        self.gscore = {s: 0.}
+        self.parent = {}
+        self.closed = set()
+        self.expansions = 0
+        self.state = 'search'
+
+    def h(self, c):
+        dx, dy = abs(c[0]-self.goal[0]), abs(c[1]-self.goal[1])
+        return (max(dx, dy)+.4143*min(dx, dy))
+
+    def advance(self, budget=400, max_ms=None):
+        import heapq
+        import time
+        if self.state != 'search':
+            return self.state
+        deadline = time.perf_counter()+max_ms/1000. if max_ms else None
+        for n in range(budget):
+            if deadline and time.perf_counter() > deadline:
+                return self.state
+            if not self.open or self.expansions > self.max_exp:
+                self.state = 'failed'
+                return self.state
+            _, g, cur = heapq.heappop(self.open)
+            if cur in self.closed:
+                continue
+            self.closed.add(cur)
+            self.expansions += 1
+            if cur == self.goal:
+                cells = [cur]
+                while cells[-1] in self.parent:
+                    cells.append(self.parent[cells[-1]])
+                self.path = [self.center(c) for c in reversed(cells)]
+                self.state = 'done'
+                return self.state
+            for dx, dy, cost in self.NEIGH:
+                n = (cur[0]+dx, cur[1]+dy)
+                if n in self.closed or not self.walkable(n):
+                    continue
+                if dx and dy and not (self.walkable((cur[0]+dx, cur[1])) and self.walkable((cur[0], cur[1]+dy))):
+                    continue
+                if not self.edge_ok(cur, n):
+                    continue
+                ng = g+cost
+                if ng < self.gscore.get(n, 1e18):
+                    self.gscore[n] = ng
+                    self.parent[n] = cur
+                    heapq.heappush(self.open, (ng+self.weight*self.h(n), ng, n))
+        return self.state
+
+    def waypoint(self, pos, stats, lookahead=30.):
+        """Farthest path point within lookahead that is straight-line clear."""
+        if self.state != 'done' or not self.path:
+            return None
+        # progress: closest path point
+        i0 = min(range(len(self.path)), key=lambda i: math.dist(pos[:2], self.path[i]))
+        self.path = self.path[i0:]
+        # Check farthest candidates first and stop at the first clear one:
+        # clear straight lines are the expensive checks, blocked ones fail fast.
+        cands = [p for p in self.path[:14] if 1. <= math.dist(pos[:2], p) <= lookahead]
+        for p in reversed(cands):
+            d = math.dist(pos[:2], p)
+            u = unit(p[0]-pos[0], p[1]-pos[1])
+            if self.arena.travel_clear(pos, u, d, stats):
+                return p
+        return self.path[1] if len(self.path) > 1 else None
