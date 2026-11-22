@@ -2,7 +2,6 @@
 import array
 import json
 import math
-import heapq
 from pathlib import Path
 import sys
 
@@ -157,74 +156,3 @@ def steer(arena, pos, goal, stats, zone, last, side):
         score = 3*(direction[0]*desired[0]+direction[1]*desired[1]) + .8*(direction[0]*last[0]+direction[1]*last[1]) - outside*.3
         candidates.append((score, -i, direction))
     return max(candidates)[2] if candidates else [0., 0.]
-
-
-def plan_route(arena, pos, goal, stats, spacing=12):
-    """Find a bounded grid route around buildings, falling back to local steering."""
-    if arena is None:
-        return []
-    bounds = arena.world['bounds']
-    radius = stats['radius']
-
-    def snap(point):
-        x = max(bounds['minX'] + radius, min(bounds['maxX'] - radius, point[0]))
-        y = max(bounds['minY'] + radius, min(bounds['maxY'] - radius, point[1]))
-        ix = round((x-bounds['minX'])/spacing)
-        iy = round((y-bounds['minY'])/spacing)
-        return ix, iy
-
-    def point(node):
-        return (bounds['minX']+node[0]*spacing, bounds['minY']+node[1]*spacing)
-
-    start, destination = snap(pos[:2]), snap(goal)
-    if start == destination:
-        return []
-
-    min_ix = 0
-    max_ix = int(math.ceil((bounds['maxX']-bounds['minX'])/spacing))
-    min_iy = 0
-    max_iy = int(math.ceil((bounds['maxY']-bounds['minY'])/spacing))
-    open_nodes = [(math.dist(point(start), goal), 0, start)]
-    came_from = {}
-    cost = {start: 0}
-    destination_point = point(destination)
-
-    def passable(from_node, node):
-        ax, ay = point(from_node)
-        bx, by = point(node)
-        dx, dy = bx-ax, by-ay
-        distance = math.hypot(dx, dy)
-        if distance < 1e-9:
-            return True
-        direction = unit(dx, dy)
-        z = arena.height(bx, by)
-        if not arena.clear_body(bx, by, z, radius, stats['height'], stats['step_up']):
-            return False
-        return arena.travel_clear([ax, ay, pos[2]], direction, distance, stats)
-
-    while open_nodes:
-        _, _, current = heapq.heappop(open_nodes)
-        if current == destination:
-            path = []
-            while current in came_from:
-                path.append(point(current))
-                current = came_from[current]
-            path.reverse()
-            return path
-
-        cx, cy = current
-        for dx, dy in ((1,0), (-1,0), (0,1), (0,-1), (1,1), (1,-1), (-1,1), (-1,-1)):
-            neighbor = cx+dx, cy+dy
-            nx, ny = neighbor
-            if not (min_ix <= nx <= max_ix and min_iy <= ny <= max_iy):
-                continue
-            if not passable(current, neighbor):
-                continue
-            next_cost = cost[current]+math.dist(point(current), point(neighbor))
-            if next_cost >= cost.get(neighbor, float('inf')):
-                continue
-            came_from[neighbor] = current
-            cost[neighbor] = next_cost
-            h = math.dist(point(neighbor), destination_point)
-            heapq.heappush(open_nodes, (next_cost+h, next_cost, neighbor))
-    return []

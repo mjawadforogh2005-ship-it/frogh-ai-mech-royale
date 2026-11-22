@@ -6,7 +6,7 @@ from pathlib import Path
 import unittest
 
 from bot import Bot, intercept
-from navigation import Arena, inside, plan_route, steer
+from navigation import Arena, inside, steer
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +77,16 @@ class StrategyTests(unittest.TestCase):
         self.assertAlmostEqual(a['aim'][0], math.atan2(40, 80))
         self.assertFalse(a['reload'])
         self.assertFalse(a['fire'][0])
+
+    def test_concentrates_fire_on_weaker_enemy(self):
+        strong = enemy(80, 0)
+        strong.update(id=10, hp=1400)
+        weak = enemy(120, 20)
+        weak.update(id=11, hp=300)
+        self.obs['mechs'] = [strong, weak]
+        self.obs['self'].update(aim=[math.atan2(20, 120), 0])
+        a = self.bot.act(self.obs)
+        self.assertAlmostEqual(a['aim'][0], math.atan2(20, 120), places=2)
 
     def test_tiny_zone_requires_precise_arrival(self):
         self.obs['zone'].update(radius=.5, next_radius=0)
@@ -170,18 +180,6 @@ class GeometryTests(unittest.TestCase):
         move = steer(self.arena, [0, 0, 0], [20, 0], stats, dict(center=[0, 0], radius=90), [0, 0], 1)
         self.assertNotEqual(move, [0., 0.])
         self.assertTrue(self.arena.travel_clear([0, 0, 0], move, 6, stats))
-
-    def test_route_planner_returns_waypoints_around_wall(self):
-        stats = HELLO['config']['mech']
-        route = plan_route(
-            self.arena,
-            [0, 0, 0],
-            [20, 0],
-            stats,
-            spacing=12,
-        )
-        self.assertTrue(route)
-        self.assertNotEqual(route[-1][1], 0)
 
     def test_walk_on_roof_without_treating_ground_as_drop(self):
         self.prism.update(ring=[-20, -20, 20, -20, 20, 20, -20, 20], top=20)

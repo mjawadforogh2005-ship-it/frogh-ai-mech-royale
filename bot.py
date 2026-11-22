@@ -2,7 +2,7 @@
 import math
 import random
 import mechfight as mf
-from navigation import Arena, plan_route, steer, unit
+from navigation import Arena, steer, unit
 
 
 def angle_error(a, b):
@@ -34,9 +34,6 @@ class Bot:
         self.stuck_since = None
         self.recover_until = 0
         self.healing = False
-        self.route_goal = None
-        self.route_points = []
-        self.route_tick = -100
         try:
             self.arena = Arena(hello['map']['dir'])
         except (OSError, ValueError, KeyError) as exc:
@@ -112,10 +109,17 @@ class Bot:
         pos, stats = me['pos'], self.stats(me)
         ratio = me['hp']/max(1, me['max_hp'])
         self.healing = ratio < .42 or (self.healing and ratio < .82)
-        enemies = sorted((e for e in obs['mechs'] if e['kind'] == 'mech'), key=lambda e: math.dist(pos, e['pos']))
-        nearest = enemies[0] if enemies else None
+        enemies = sorted(
+            (e for e in obs['mechs'] if e['kind'] == 'mech'),
+            key=lambda e: (
+                e['hp']/max(1, e['max_hp']),
+                math.dist(pos, e['pos']),
+            ),
+        )
+        nearest = min(enemies, key=lambda e: math.dist(pos, e['pos'])) if enemies else None
         threat_distance = math.dist(pos, nearest['pos']) if nearest else float('inf')
-        retreat = self.healing or sum(math.dist(pos, e['pos']) < 90 for e in enemies) >= 2
+        close_enemies = sum(math.dist(pos, e['pos']) < 130 for e in enemies)
+        retreat = self.healing or close_enemies >= 2 or (ratio < .55 and threat_distance < 150)
         # Move early enough to reach the next circle before the shrink ends.
         to_next = max(0, math.dist(pos[:2], zone['next_center'])-zone['next_radius']+18)
         urgent = not self.safe(pos, zone, 18) or now + to_next/max(1, stats['walk_speed'])*1.6 + 8 > zone['shrink_end']
@@ -141,8 +145,8 @@ class Bot:
                 goal, mode = min(loot, key=lambda p: p[0])[1][:2], 'loot'
             elif nearest and not retreat and threat_distance < 180:
                 toward = unit(nearest['pos'][0]-pos[0], nearest['pos'][1]-pos[1])
-                desired_range = 95 if 'lightning' in nearest.get('weapons', []) else 70
-                radial = max(-1, min(1, (threat_distance-desired_range)/30))
+                desired_range = 125 if 'lightning' in nearest.get('weapons', []) else 105
+                radial = max(-1, min(1, (threat_distance-desired_range)/35))
                 goal = [pos[0]+25*(toward[0]*radial-toward[1]*self.side), pos[1]+25*(toward[1]*radial+toward[0]*self.side)]
                 mode = 'engage'
         # Keep nonurgent destinations inside the current circle.
@@ -151,17 +155,6 @@ class Bot:
             r = max(0, zone['radius']-20)
             if math.dist(goal[:2], zone['center']) > r:
                 goal = [zone['center'][0]+delta[0]*r, zone['center'][1]+delta[1]*r]
-        route_key = (round(goal[0]/24)*24, round(goal[1]/24)*24)
-        if (route_key != self.route_goal or now-self.route_tick > 2.0 or not self.route_points):
-            self.route_points = plan_route(self.arena, pos, goal, stats, spacing=24)
-            self.route_goal = route_key
-            self.route_tick = now
-        if self.route_points:
-            while len(self.route_points) > 1 and math.dist(pos[:2], self.route_points[0]) < 18:
-                self.route_points.pop(0)
-            route_goal = self.route_points[0]
-        else:
-            route_goal = goal
         if self.last_pos and math.dist(pos[:2], self.last_pos[:2]) < .15 and self.last_wanted:
             self.stuck_since = now if self.stuck_since is None else self.stuck_since
         else:
@@ -174,9 +167,8 @@ class Bot:
             self.recovery_direction = [-toward[1]*self.side, toward[0]*self.side]
         if now < self.recover_until:
             goal = [pos[0]+self.recovery_direction[0]*12, pos[1]+self.recovery_direction[1]*12]
-        movement_goal = goal if now < self.recover_until else route_goal
         arrival = min(2., max(.05, zone['radius']*.2))
-        move = steer(self.arena, pos, movement_goal, stats, zone, self.last_move, self.side) if math.dist(pos[:2], movement_goal[:2]) > arrival else [0., 0.]
+        move = steer(self.arena, pos, goal, stats, zone, self.last_move, self.side) if math.dist(pos[:2], goal[:2]) > arrival else [0., 0.]
         # React to approaching projectiles using their closest approach in the next second.
         for p in obs['projectiles'][:24]:
             if p['kind'] == 'mortar':
@@ -203,7 +195,9 @@ class Bot:
         if pickups and any(w is None for w in me['weapons']):
             action['take'] = max(pickups, key=lambda p: {'laser': 3, 'lightning': 2, 'mortar': 1, 'gun': 0}[p['kind']])['id']
         targets = enemies[:4]
-        if not retreat and threat_distance > 90:
+        if enemies:
+            targets = enemies[:4]
+        elif not retreat and threat_distance > 90:
             targets += sorted(obs['crates'], key=lambda c: math.dist(pos, c['pos']))[:2]
             targets += sorted((e for e in obs['mechs'] if e['kind'] == 'npc'), key=lambda e: math.dist(pos, e['pos']))[:1]
         if self.healing and threat_distance > 45:
@@ -222,6 +216,9 @@ class Bot:
                 solutions[(target['id'], slot)] = sol
                 if sol:
                     score = (100 if target.get('kind') == 'mech' else 35) - sol[1]*.15 + (100 if w.get('charge', 0) > 0 else 0)
+                    if target.get('kind') == 'mech':
+                        target_ratio = target['hp']/max(1, target['max_hp'])
+                        score += 55*(1-target_ratio)
                     score += {'laser': 12, 'lightning': 15, 'gun': 5, 'mortar': 0}[w['kind']]
                     if w.get('cooldown', 0) > .1:
                         score -= 30
@@ -252,7 +249,7 @@ class Bot:
             if w and w['kind'] == 'gun' and not w.get('reload', 0):
                 action['reload'] = bool(w.get('ammo', 0) == 0 or (not choices and threat_distance > 150 and w.get('ammo', 0) < self.weapon_stats(w)['mag']*.65))
         self.last_pos, self.last_move = list(pos), move
-        self.last_wanted = math.dist(pos[:2], movement_goal[:2]) > arrival
+        self.last_wanted = math.dist(pos[:2], goal[:2]) > arrival
         mf.draw.label(f'{mode} | hp {ratio:.0%}')
         mf.draw.point([*goal[:2], pos[2]], '#40c0ff', 5)
         return action

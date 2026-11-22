@@ -6,7 +6,7 @@ Python bot for the Builders Mech Royale competition. The custom bot is `bot.py`;
 
 - Prioritize the current safe zone and start moving toward the next circle before travel time becomes critical.
 - Retreat when health is low or nearby opponents outnumber us; stop attacking at a distance to allow regeneration.
-- Use the supplied terrain and building polygons for route planning, ground clearance, local steering, and firing-path checks. Avoid steep steps and large drops, and attempt recovery when stuck.
+- Use the supplied terrain and building polygons for ground clearance, local steering, and firing-path checks. Avoid steep steps and large drops, and attempt recovery when stuck.
 - Lead gun targets using projectile interception. Gate shots on actual torso aim; handle laser charge/release, lightning energy reserves, and low-arc mortar shots separately.
 - Collect reachable cubes and weapons, approach nearby uncontested supply drops, and prioritize defensive upgrades.
 - React to incoming straight-line projectiles and preserve energy for escapes.
