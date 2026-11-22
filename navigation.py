@@ -262,6 +262,7 @@ class Planner:
                 continue
             self.closed.add(cur)
             self.expansions += 1
+            n_done = 0
             if cur == self.goal:
                 cells = [cur]
                 while cells[-1] in self.parent:
@@ -271,7 +272,16 @@ class Planner:
                 return self.state
             for dx, dy, cost in self.NEIGH:
                 n = (cur[0]+dx, cur[1]+dy)
-                if n in self.closed or not self.walkable(n):
+                if n in self.closed:
+                    continue
+                if deadline and time.perf_counter() > deadline and (n_done or self.expansions > 1):
+                    # Out of time mid-expansion: put the node back and resume next decision.
+                    self.closed.discard(cur)
+                    self.expansions -= 1
+                    heapq.heappush(self.open, (g+self.weight*self.h(cur), g, cur))
+                    return self.state
+                n_done += 1
+                if not self.walkable(n):
                     continue
                 if dx and dy and not (self.walkable((cur[0]+dx, cur[1])) and self.walkable((cur[0], cur[1]+dy))):
                     continue

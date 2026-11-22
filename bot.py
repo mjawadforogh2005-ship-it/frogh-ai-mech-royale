@@ -59,7 +59,7 @@ class Bot:
         moved = pl.goal_xy is None or math.dist(goal, pl.goal_xy) > 25
         if pl.state is None or moved or (pl.state in ('done', 'failed') and now-pl.age_t > 12):
             pl.start(pos[:2], goal, now)
-        pl.advance(1500, max_ms=8)
+        pl.advance(1500, max_ms=6)
         wp = pl.waypoint(pos, stats)
         return list(wp) if wp else goal
 

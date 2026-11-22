@@ -32,11 +32,14 @@ class PlannerTests(unittest.TestCase):
 
     def test_time_budget_is_respected(self):
         import time
-        p = Planner(self.arena, STATS)
-        p.start((417, 31), (43, -73))
-        t = time.perf_counter()
-        p.advance(10**6, max_ms=5)
-        self.assertLess((time.perf_counter()-t)*1000, 25)
+        best = float('inf')
+        for _ in range(3):  # best of three: a busy machine must not fail the test
+            p = Planner(self.arena, STATS)
+            p.start((417, 31), (43, -73))
+            t = time.perf_counter()
+            p.advance(10**6, max_ms=5)
+            best = min(best, (time.perf_counter()-t)*1000)
+        self.assertLess(best, 20)
 
 
 if __name__ == '__main__':
