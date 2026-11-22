@@ -9,6 +9,14 @@ def angle_error(a, b):
     return abs((a-b+math.pi) % (2*math.pi)-math.pi)
 
 
+def health_ratio(actor):
+    """Unknown enemy health must not fail a decision or imply a weak target."""
+    hp, maximum = actor.get('hp'), actor.get('max_hp')
+    if hp is None or maximum is None or maximum <= 0:
+        return 1.
+    return max(0., min(1., hp / maximum))
+
+
 def intercept(relative, velocity, speed):
     a = sum(v*v for v in velocity)-speed*speed
     b = 2*sum(x*v for x, v in zip(relative, velocity))
@@ -112,7 +120,7 @@ class Bot:
         enemies = sorted(
             (e for e in obs['mechs'] if e['kind'] == 'mech'),
             key=lambda e: (
-                e['hp']/max(1, e['max_hp']),
+                health_ratio(e),
                 math.dist(pos, e['pos']),
             ),
         )
@@ -194,17 +202,17 @@ class Bot:
         pickups = [p for p in obs['pickups'] if p['kind'] not in held and math.dist(pos[:2], p['pos'][:2]) <= self.config['loot']['pickup_radius'] and abs(pos[2]-p['pos'][2]) <= 4]
         if pickups and any(w is None for w in me['weapons']):
             action['take'] = max(pickups, key=lambda p: {'laser': 3, 'lightning': 2, 'mortar': 1, 'gun': 0}[p['kind']])['id']
-        targets = enemies[:4]
-        if enemies:
-            targets = enemies[:4]
-        elif not retreat and threat_distance > 90:
+        targets = list(enemies)
+        if not enemies and not retreat and threat_distance > 90:
             targets += sorted(obs['crates'], key=lambda c: math.dist(pos, c['pos']))[:2]
             targets += sorted((e for e in obs['mechs'] if e['kind'] == 'npc'), key=lambda e: math.dist(pos, e['pos']))[:1]
         if self.healing and threat_distance > 45:
             targets = []  # Dealing damage resets health regeneration too.
         choices = []
         solutions = {}
+        usable_targets = 0
         for target in targets:
+            found_solution = False
             for slot, w in enumerate(me['weapons']):
                 if not w or w.get('reload', 0) > 0 or (w['kind'] == 'gun' and w.get('ammo', 0) == 0):
                     continue
@@ -215,14 +223,20 @@ class Bot:
                 sol = self.solution(me, target, w)
                 solutions[(target['id'], slot)] = sol
                 if sol:
+                    found_solution = True
                     score = (100 if target.get('kind') == 'mech' else 35) - sol[1]*.15 + (100 if w.get('charge', 0) > 0 else 0)
                     if target.get('kind') == 'mech':
-                        target_ratio = target['hp']/max(1, target['max_hp'])
+                        target_ratio = health_ratio(target)
                         score += 55*(1-target_ratio)
                     score += {'laser': 12, 'lightning': 15, 'gun': 5, 'mortar': 0}[w['kind']]
                     if w.get('cooldown', 0) > .1:
                         score -= 30
                     choices.append((score, slot, target, sol))
+            # Blocked or out-of-range enemies must not consume the shortlist.
+            if found_solution:
+                usable_targets += 1
+                if usable_targets >= 4:
+                    break
         if choices:
             _, slot, target, sol = max(choices, key=lambda c: c[0])
             action['aim'] = sol[0]

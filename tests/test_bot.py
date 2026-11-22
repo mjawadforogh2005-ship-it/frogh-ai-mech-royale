@@ -88,6 +88,50 @@ class StrategyTests(unittest.TestCase):
         a = self.bot.act(self.obs)
         self.assertAlmostEqual(a['aim'][0], math.atan2(20, 120), places=2)
 
+    def test_missing_enemy_health_still_allows_firing(self):
+        target = enemy()
+        del target['hp']
+        del target['max_hp']
+        self.obs['mechs'] = [target]
+        self.assertTrue(self.bot.act(self.obs)['fire'][0])
+
+    def test_partially_hidden_enemy_health(self):
+        for field in ('hp', 'max_hp'):
+            target = enemy()
+            del target[field]
+            self.obs['mechs'] = [target]
+            self.assertTrue(self.bot.act(self.obs)['fire'][0])
+
+    def test_blocked_weak_enemies_do_not_hide_exposed_target(self):
+        class Wall:
+            def ray_clear(self, start, end):
+                return end[0] < 100
+
+            def travel_clear(self, *args):
+                return True
+
+        self.bot.arena = Wall()
+        self.obs['mechs'] = []
+        for i in range(4):
+            target = enemy(120 + i * 5)
+            target.update(id=i, hp=100)
+            self.obs['mechs'].append(target)
+        target = enemy(60)
+        target['id'] = 10
+        self.obs['mechs'].append(target)
+        self.assertTrue(self.bot.act(self.obs)['fire'][0])
+
+    def test_out_of_range_weak_enemies_do_not_hide_exposed_target(self):
+        self.obs['mechs'] = []
+        for i in range(4):
+            target = enemy(300 + i * 5)
+            target.update(id=i, hp=100)
+            self.obs['mechs'].append(target)
+        target = enemy(60)
+        target['id'] = 10
+        self.obs['mechs'].append(target)
+        self.assertTrue(self.bot.act(self.obs)['fire'][0])
+
     def test_tiny_zone_requires_precise_arrival(self):
         self.obs['zone'].update(radius=.5, next_radius=0)
         self.obs['self']['pos'] = [1, 0, 0]
